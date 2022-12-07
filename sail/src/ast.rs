@@ -48,19 +48,25 @@ pub enum Bit {
 /// **Not to be confused with `ocaml::Value`**
 #[derive(Debug, Clone, FromValue, Serialize, Deserialize, DeepSizeOf)]
 pub enum Value {
-    Vector(LinkedList<Value>),
-    List(LinkedList<Value>),
+    Vector(LinkedList<EnumWrapper<Value>>),
+    List(LinkedList<EnumWrapper<Value>>),
     Int(BigInt),
     Real(Num),
     Bool(bool),
     Bit(Bit),
-    Tuple(LinkedList<Value>),
+    Tuple(LinkedList<EnumWrapper<Value>>),
     Unit,
     String(OCamlString),
     Ref(OCamlString),
-    Ctor(OCamlString, LinkedList<Value>),
-    Record(LinkedList<(OCamlString, Value)>),
+    Ctor(OCamlString, LinkedList<EnumWrapper<Value>>),
+    Record(LinkedList<(OCamlString, EnumWrapper<Value>)>),
     AttemptedRead(OCamlString),
+}
+
+impl Walkable for EnumWrapper<Value> {
+    fn walk<V: Visitor>(&self, visitor: &mut V) {
+        todo!()
+    }
 }
 
 /// Annotation with generic value (ignored as unit here)
@@ -497,8 +503,8 @@ pub struct Literal {
 }
 
 impl Walkable for Literal {
-    fn walk<V: Visitor>(&self, visitor: &mut V) {
-        todo!()
+    fn walk<V: Visitor>(&self, _: &mut V) {
+        // leaf node
     }
 }
 
@@ -662,6 +668,14 @@ pub struct InternalLoopMeasure {
     pub location: L,
 }
 
+impl Walkable for InternalLoopMeasure {
+    fn walk<V: Visitor>(&self, visitor: &mut V) {
+        self.inner
+            .as_ref()
+            .map(|exp| visitor.visit_expression(&*exp));
+    }
+}
+
 /// Expression
 #[derive(Debug, Clone, FromValue, Serialize, Deserialize, DeepSizeOf)]
 pub enum ExpressionAux {
@@ -775,7 +789,7 @@ pub enum ExpressionAux {
 
     /// For internal use in interpreter to wrap pre-evaluated values when
     /// returning an action
-    InternalValue(Value),
+    InternalValue(EnumWrapper<Value>),
 
     Constraint(NConstraint),
 }
@@ -790,7 +804,128 @@ pub struct Expression {
 
 impl Walkable for Expression {
     fn walk<V: Visitor>(&self, visitor: &mut V) {
-        todo!()
+        match &*self.inner {
+            ExpressionAux::Block(exps) => exps.iter().for_each(|exp| visitor.visit_expression(exp)),
+            ExpressionAux::Identifier(id) => visitor.visit_identifier(id),
+            ExpressionAux::Literal(lit) => visitor.visit_literal(lit),
+            ExpressionAux::Cast(typ, exp) => {
+                visitor.visit_typ(typ);
+                visitor.visit_expression(exp);
+            }
+            ExpressionAux::Application(id, exps) => {
+                visitor.visit_identifier(id);
+                exps.iter().for_each(|exp| visitor.visit_expression(exp));
+            }
+            ExpressionAux::ApplicationInfix(exp0, id, exp1) => {
+                visitor.visit_expression(exp0);
+                visitor.visit_identifier(id);
+                visitor.visit_expression(exp1);
+            }
+            ExpressionAux::Tuple(exps) => exps.iter().for_each(|exp| visitor.visit_expression(exp)),
+            ExpressionAux::If(exp0, exp1, exp2) => {
+                visitor.visit_expression(exp0);
+                visitor.visit_expression(exp1);
+                visitor.visit_expression(exp2);
+            }
+            ExpressionAux::Loop(_, internal_loop_measure, exp0, exp1) => {
+                visitor.visit_internal_loop_measure(internal_loop_measure);
+                visitor.visit_expression(exp0);
+                visitor.visit_expression(exp1);
+            }
+            ExpressionAux::For(id, exp0, exp1, exp2, order, exp3) => {
+                visitor.visit_identifier(id);
+                visitor.visit_expression(exp0);
+                visitor.visit_expression(exp1);
+                visitor.visit_expression(exp2);
+                visitor.visit_order(order);
+                visitor.visit_expression(exp3);
+            }
+            ExpressionAux::Vector(exps) => {
+                exps.iter().for_each(|exp| visitor.visit_expression(exp))
+            }
+
+            ExpressionAux::VectorAccess(exp0, exp1) => {
+                visitor.visit_expression(exp0);
+                visitor.visit_expression(exp1);
+            }
+            ExpressionAux::VectorSubrange(exp0, exp1, exp2) => {
+                visitor.visit_expression(exp0);
+                visitor.visit_expression(exp1);
+                visitor.visit_expression(exp2);
+            }
+            ExpressionAux::VectorUpdate(exp0, exp1, exp2) => {
+                visitor.visit_expression(exp0);
+                visitor.visit_expression(exp1);
+                visitor.visit_expression(exp2);
+            }
+            ExpressionAux::VectorUpdateSubrange(exp0, exp1, exp2, exp3) => {
+                visitor.visit_expression(exp0);
+                visitor.visit_expression(exp1);
+                visitor.visit_expression(exp2);
+                visitor.visit_expression(exp3);
+            }
+            ExpressionAux::VectorAppend(exp0, exp1) => {
+                visitor.visit_expression(exp0);
+                visitor.visit_expression(exp1);
+            }
+            ExpressionAux::List(exps) => exps.iter().for_each(|exp| visitor.visit_expression(exp)),
+            ExpressionAux::Cons(exp0, exp1) => {
+                visitor.visit_expression(exp0);
+                visitor.visit_expression(exp1);
+            }
+            ExpressionAux::Record(exps) => exps
+                .iter()
+                .for_each(|exp| visitor.visit_field_expression(exp)),
+            ExpressionAux::RecordUpdate(exp, exps) => {
+                visitor.visit_expression(exp);
+                exps.iter()
+                    .for_each(|exp| visitor.visit_field_expression(exp))
+            }
+            ExpressionAux::Field(exp, id) => {
+                visitor.visit_expression(exp);
+                visitor.visit_identifier(id);
+            }
+            ExpressionAux::Case(exp, pats) => {
+                visitor.visit_expression(exp);
+                pats.iter().for_each(|pat| visitor.visit_pattern_match(pat));
+            }
+            ExpressionAux::Let(letbind, exp) => {
+                visitor.visit_letbind(letbind);
+                visitor.visit_expression(exp);
+            }
+            ExpressionAux::Assign(lvalexp, exp) => {
+                visitor.visit_lvalue_expression(lvalexp);
+                visitor.visit_expression(exp);
+            }
+            ExpressionAux::SizeOf(nexp) => {
+                visitor.visit_numeric_expression(nexp);
+            }
+            ExpressionAux::Return(exp) => visitor.visit_expression(exp),
+            ExpressionAux::Exit(exp) => visitor.visit_expression(exp),
+            ExpressionAux::Ref(id) => visitor.visit_identifier(id),
+            ExpressionAux::Throw(exp) => visitor.visit_expression(exp),
+            ExpressionAux::Try(exp, pats) => {
+                visitor.visit_expression(exp);
+                pats.iter().for_each(|pat| visitor.visit_pattern_match(pat));
+            }
+            ExpressionAux::Assert(exp0, exp1) => {
+                visitor.visit_expression(exp0);
+                visitor.visit_expression(exp1);
+            }
+            ExpressionAux::Var(lvalexp, exp0, exp1) => {
+                visitor.visit_lvalue_expression(lvalexp);
+                visitor.visit_expression(exp0);
+                visitor.visit_expression(exp1);
+            }
+            ExpressionAux::InternalPLet(pat, exp0, exp1) => {
+                visitor.visit_pattern(pat);
+                visitor.visit_expression(exp0);
+                visitor.visit_expression(exp1);
+            }
+            ExpressionAux::InternalReturn(exp) => visitor.visit_expression(exp),
+            ExpressionAux::InternalValue(val) => visitor.visit_value(val),
+            ExpressionAux::Constraint(ncon) => visitor.visit_nconstraint(ncon),
+        }
     }
 }
 
@@ -820,6 +955,22 @@ pub struct LValueExpression {
     pub annotation: Annot,
 }
 
+impl Walkable for LValueExpression {
+    fn walk<V: Visitor>(&self, visitor: &mut V) {
+        match &*self.inner {
+            LValueExpressionAux::Identifier(_) => todo!(),
+            LValueExpressionAux::Deref(_) => todo!(),
+            LValueExpressionAux::Memory(_, _) => todo!(),
+            LValueExpressionAux::Cast(_, _) => todo!(),
+            LValueExpressionAux::Tuple(_) => todo!(),
+            LValueExpressionAux::VectorConcat(_) => todo!(),
+            LValueExpressionAux::Vector(_, _) => todo!(),
+            LValueExpressionAux::VectorRange(_, _, _) => todo!(),
+            LValueExpressionAux::Field(_, _) => todo!(),
+        }
+    }
+}
+
 /// Field Expression
 #[identifiable_fromvalue]
 #[derive(Debug, Clone, Serialize, Deserialize, DeepSizeOf)]
@@ -834,6 +985,13 @@ pub struct FieldExpressionAux {
 pub struct FieldExpression {
     pub inner: FieldExpressionAux,
     pub annotation: Annot,
+}
+
+impl Walkable for FieldExpression {
+    fn walk<V: Visitor>(&self, visitor: &mut V) {
+        visitor.visit_identifier(&self.inner.identifier);
+        visitor.visit_expression(&self.inner.expression);
+    }
 }
 
 /// Pattern match
@@ -886,6 +1044,13 @@ pub struct LetBindAux {
 pub struct LetBind {
     pub let_bind: LetBindAux,
     pub annotation: Annot,
+}
+
+impl Walkable for LetBind {
+    fn walk<V: Visitor>(&self, visitor: &mut V) {
+        visitor.visit_pattern(&self.let_bind.pattern);
+        visitor.visit_expression(&self.let_bind.expression);
+    }
 }
 
 /// Mapping pattern

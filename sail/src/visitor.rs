@@ -5,12 +5,14 @@
 use crate::{
     ast::{
         Ast, BaseEffect, Comment, CommentRoot, DefaultSpec, Definition, Effect, EffectOpt,
-        Expression, FunctionClause, FunctionDefinition, Identifier, KindIdentifier,
-        KindedIdentifier, Literal, NConstraint, NumericExpression, Order, Pattern, PatternMatch,
-        QuantItem, RecursiveAnnotationOpt, Typ, TypArg, TypPat, TypQuant, TypeAnnotationOpt,
-        TypeDefinition, TypeScheme, ValueSpecification,
+        Expression, FieldExpression, FunctionClause, FunctionDefinition, Identifier,
+        InternalLoopMeasure, KindIdentifier, KindedIdentifier, LValueExpression, LetBind, Literal,
+        Loop, NConstraint, NumericExpression, Order, Pattern, PatternMatch, QuantItem,
+        RecursiveAnnotationOpt, Typ, TypArg, TypPat, TypQuant, TypeAnnotationOpt, TypeDefinition,
+        TypeScheme, Value, ValueSpecification,
     },
     num::BigInt,
+    types::EnumWrapper,
 };
 
 /// Visitor trait for interacting with Sail AST
@@ -167,6 +169,31 @@ pub trait Visitor: Sized {
 
     #[allow(missing_docs)]
     fn visit_pattern_match(&mut self, node: &PatternMatch) {
+        node.walk(self);
+    }
+
+    #[allow(missing_docs)]
+    fn visit_internal_loop_measure(&mut self, node: &InternalLoopMeasure) {
+        node.walk(self);
+    }
+
+    #[allow(missing_docs)]
+    fn visit_field_expression(&mut self, node: &FieldExpression) {
+        node.walk(self);
+    }
+
+    #[allow(missing_docs)]
+    fn visit_letbind(&mut self, node: &LetBind) {
+        node.walk(self);
+    }
+
+    #[allow(missing_docs)]
+    fn visit_lvalue_expression(&mut self, node: &LValueExpression) {
+        node.walk(self);
+    }
+
+    #[allow(missing_docs)]
+    fn visit_value(&mut self, node: &EnumWrapper<Value>) {
         node.walk(self);
     }
 }
