@@ -149,11 +149,23 @@ pub struct BaseEffect {
     pub location: L,
 }
 
+impl Walkable for BaseEffect {
+    fn walk<V: Visitor>(&self, _: &mut V) {
+        // leaf node
+    }
+}
+
 #[identifiable_fromvalue]
 #[derive(Debug, Clone, Serialize, Deserialize, DeepSizeOf)]
 pub struct KindIdentifier {
     pub inner: KindIdentifierAux,
     pub location: L,
+}
+
+impl Walkable for KindIdentifier {
+    fn walk<V: Visitor>(&self, _: &mut V) {
+        // leaf node
+    }
 }
 
 /// Base kind
@@ -224,11 +236,50 @@ pub struct NumericExpression {
     pub location: L,
 }
 
+impl Walkable for NumericExpression {
+    fn walk<V: Visitor>(&self, visitor: &mut V) {
+        match &*self.inner {
+            NumericExpressionAux::Id(id) => visitor.visit_identifier(id),
+            NumericExpressionAux::Var(kid) => visitor.visit_kind_identifier(kid),
+            NumericExpressionAux::Constant(bi) => visitor.visit_big_int(bi),
+            NumericExpressionAux::Application(id, nexps) => {
+                visitor.visit_identifier(id);
+                nexps
+                    .iter()
+                    .for_each(|nexp| visitor.visit_numeric_expression(nexp))
+            }
+            NumericExpressionAux::Times(nexp0, nexp1) => {
+                visitor.visit_numeric_expression(nexp0);
+                visitor.visit_numeric_expression(nexp1);
+            }
+            NumericExpressionAux::Sum(nexp0, nexp1) => {
+                visitor.visit_numeric_expression(nexp0);
+                visitor.visit_numeric_expression(nexp1);
+            }
+            NumericExpressionAux::Minus(nexp0, nexp1) => {
+                visitor.visit_numeric_expression(nexp0);
+                visitor.visit_numeric_expression(nexp1);
+            }
+            NumericExpressionAux::Exponential(nexp) => visitor.visit_numeric_expression(nexp),
+            NumericExpressionAux::Negation(nexp) => visitor.visit_numeric_expression(nexp),
+        }
+    }
+}
+
 #[identifiable_fromvalue]
 #[derive(Debug, Clone, Serialize, Deserialize, DeepSizeOf)]
 pub struct Effect {
     pub inner: EffectAux,
     pub location: L,
+}
+
+impl Walkable for Effect {
+    fn walk<V: Visitor>(&self, visitor: &mut V) {
+        self.inner
+            .inner
+            .iter()
+            .for_each(|be| visitor.visit_base_effect(be));
+    }
 }
 
 #[identifiable_fromvalue]
@@ -238,12 +289,27 @@ pub struct Order {
     pub location: L,
 }
 
+impl Walkable for Order {
+    fn walk<V: Visitor>(&self, visitor: &mut V) {
+        match &self.inner {
+            OrderAux::Variable(kid) => visitor.visit_kind_identifier(kid),
+            OrderAux::Increasing | OrderAux::Decreasing => (),
+        }
+    }
+}
+
 /// Optionally kind-annotated identifier
 #[identifiable_fromvalue]
 #[derive(Debug, Clone, Serialize, Deserialize, DeepSizeOf)]
 pub struct KindedIdentifier {
     pub inner: KindIdentifierAux,
     pub location: L,
+}
+
+impl Walkable for KindedIdentifier {
+    fn walk<V: Visitor>(&self, _: &mut V) {
+        // leaf node
+    }
 }
 
 /// Literal constant
@@ -292,6 +358,36 @@ pub struct Typ {
     pub annotation: L,
 }
 
+impl Walkable for Typ {
+    fn walk<V: Visitor>(&self, visitor: &mut V) {
+        match &*self.inner {
+            TypAux::InternalUnknown => (),
+            TypAux::Id(id) => visitor.visit_identifier(id),
+            TypAux::Var(kid) => visitor.visit_kind_identifier(kid),
+            TypAux::Fn(typs, typ, effect) => {
+                typs.iter().for_each(|t| visitor.visit_typ(t));
+                visitor.visit_typ(typ);
+                visitor.visit_effect(effect);
+            }
+            TypAux::BiDir(typ0, typ1, effect) => {
+                visitor.visit_typ(typ0);
+                visitor.visit_typ(typ1);
+                visitor.visit_effect(effect);
+            }
+            TypAux::Tuple(typs) => typs.iter().for_each(|typ| visitor.visit_typ(typ)),
+            TypAux::Application(_, typargs) => typargs
+                .iter()
+                .for_each(|typarg| visitor.visit_typarg(typarg)),
+            TypAux::Exist(kids, nconstraint, typ) => {
+                kids.iter()
+                    .for_each(|kid| visitor.visit_kinded_identifier(kid));
+                visitor.visit_nconstraint(nconstraint);
+                visitor.visit_typ(typ);
+            }
+        }
+    }
+}
+
 /// Type constructor arguments of all kinds
 #[derive(Debug, Clone, FromValue, Serialize, Deserialize, DeepSizeOf)]
 pub enum TypArgAux {
@@ -306,6 +402,17 @@ pub enum TypArgAux {
 pub struct TypArg {
     pub inner: TypArgAux,
     pub location: L,
+}
+
+impl Walkable for TypArg {
+    fn walk<V: Visitor>(&self, visitor: &mut V) {
+        match &self.inner {
+            TypArgAux::NExp(n) => visitor.visit_numeric_expression(n),
+            TypArgAux::Typ(n) => visitor.visit_typ(n),
+            TypArgAux::Order(n) => visitor.visit_order(n),
+            TypArgAux::Bool(n) => visitor.visit_nconstraint(n),
+        }
+    }
 }
 
 /// Constraint over kind Int
@@ -333,11 +440,66 @@ pub struct NConstraint {
     pub location: L,
 }
 
+impl Walkable for NConstraint {
+    fn walk<V: Visitor>(&self, visitor: &mut V) {
+        match &*self.inner {
+            NConstraintAux::Equal(n1, n2) => {
+                visitor.visit_numeric_expression(n1);
+                visitor.visit_numeric_expression(n2);
+            }
+            NConstraintAux::BoundedGe(n1, n2) => {
+                visitor.visit_numeric_expression(n1);
+                visitor.visit_numeric_expression(n2);
+            }
+            NConstraintAux::BoundedGt(n1, n2) => {
+                visitor.visit_numeric_expression(n1);
+                visitor.visit_numeric_expression(n2);
+            }
+            NConstraintAux::BoundedLe(n1, n2) => {
+                visitor.visit_numeric_expression(n1);
+                visitor.visit_numeric_expression(n2);
+            }
+            NConstraintAux::BoundedLt(n1, n2) => {
+                visitor.visit_numeric_expression(n1);
+                visitor.visit_numeric_expression(n2);
+            }
+            NConstraintAux::NotEqual(n1, n2) => {
+                visitor.visit_numeric_expression(n1);
+                visitor.visit_numeric_expression(n2);
+            }
+            NConstraintAux::Set(ki, bigints) => {
+                visitor.visit_kind_identifier(ki);
+                bigints.iter().for_each(|bi| visitor.visit_big_int(bi));
+            }
+            NConstraintAux::Or(n1, n2) => {
+                visitor.visit_nconstraint(n1);
+                visitor.visit_nconstraint(n1);
+            }
+            NConstraintAux::And(n1, n2) => {
+                visitor.visit_nconstraint(n1);
+                visitor.visit_nconstraint(n1);
+            }
+            NConstraintAux::App(ident, typargs) => {
+                visitor.visit_identifier(ident);
+                typargs.iter().for_each(|ta| visitor.visit_typarg(ta));
+            }
+            NConstraintAux::Var(ki) => visitor.visit_kind_identifier(ki),
+            NConstraintAux::True | NConstraintAux::False => (),
+        }
+    }
+}
+
 #[identifiable_fromvalue]
 #[derive(Debug, Clone, Serialize, Deserialize, DeepSizeOf)]
 pub struct Literal {
     pub inner: LiteralAux,
     pub location: L,
+}
+
+impl Walkable for Literal {
+    fn walk<V: Visitor>(&self, visitor: &mut V) {
+        todo!()
+    }
 }
 
 /// Type pattern
@@ -353,6 +515,12 @@ pub enum TypPatAux {
 pub struct TypPat {
     pub inner: TypPatAux,
     pub location: L,
+}
+
+impl Walkable for TypPat {
+    fn walk<V: Visitor>(&self, visitor: &mut V) {
+        todo!()
+    }
 }
 
 /// Kinded identifier or Int constraint
@@ -423,12 +591,68 @@ pub struct Pattern {
     pub annotation: Annot,
 }
 
+impl Walkable for Pattern {
+    fn walk<V: Visitor>(&self, visitor: &mut V) {
+        match &*self.inner {
+            PatternAux::Literal(lit) => visitor.visit_literal(lit),
+            PatternAux::Wildcard => (),
+            PatternAux::Or(pat0, pat1) => {
+                visitor.visit_pattern(pat0);
+                visitor.visit_pattern(pat1);
+            }
+            PatternAux::Not(pat) => visitor.visit_pattern(pat),
+            PatternAux::As(pat, id) => {
+                visitor.visit_pattern(pat);
+                visitor.visit_identifier(id);
+            }
+            PatternAux::Type(typ, pat) => {
+                visitor.visit_typ(typ);
+                visitor.visit_pattern(pat);
+            }
+            PatternAux::Identifier(id) => visitor.visit_identifier(id),
+            PatternAux::Variable(pat, typpat) => {
+                visitor.visit_pattern(pat);
+                visitor.visit_typpat(typpat);
+            }
+            PatternAux::Application(id, pats) => {
+                visitor.visit_identifier(id);
+                pats.iter().for_each(|pat| visitor.visit_pattern(pat));
+            }
+            PatternAux::Vector(pats) => pats.iter().for_each(|pat| visitor.visit_pattern(pat)),
+            PatternAux::VectorConcat(pats) => {
+                pats.iter().for_each(|pat| visitor.visit_pattern(pat))
+            }
+            PatternAux::Tuple(pats) => pats.iter().for_each(|pat| visitor.visit_pattern(pat)),
+            PatternAux::List(pats) => pats.iter().for_each(|pat| visitor.visit_pattern(pat)),
+            PatternAux::Cons(pat0, pat1) => {
+                visitor.visit_pattern(pat0);
+                visitor.visit_pattern(pat1);
+            }
+            PatternAux::StringAppend(pats) => {
+                pats.iter().for_each(|pat| visitor.visit_pattern(pat))
+            }
+        }
+    }
+}
+
 /// Either a kinded identifier or a nexp constraint for a typquant
 #[identifiable_fromvalue]
 #[derive(Debug, Clone, Serialize, Deserialize, DeepSizeOf)]
 pub struct QuantItem {
     pub inner: QuantItemAux,
     pub location: L,
+}
+
+impl Walkable for QuantItem {
+    fn walk<V: Visitor>(&self, visitor: &mut V) {
+        match &self.inner {
+            QuantItemAux::KindedIdentifier(n) => visitor.visit_kinded_identifier(n),
+            QuantItemAux::Constraint(n) => visitor.visit_nconstraint(n),
+            QuantItemAux::Constant(ns) => {
+                ns.iter().for_each(|n| visitor.visit_kinded_identifier(n))
+            }
+        }
+    }
 }
 
 #[identifiable_fromvalue]
@@ -564,6 +788,12 @@ pub struct Expression {
     pub annotation: Annot,
 }
 
+impl Walkable for Expression {
+    fn walk<V: Visitor>(&self, visitor: &mut V) {
+        todo!()
+    }
+}
+
 /// l-value expression
 #[derive(Debug, Clone, FromValue, Serialize, Deserialize, DeepSizeOf)]
 pub enum LValueExpressionAux {
@@ -623,6 +853,22 @@ pub enum PatternMatchAux {
 pub struct PatternMatch {
     pub inner: PatternMatchAux,
     pub annotation: Annot,
+}
+
+impl Walkable for PatternMatch {
+    fn walk<V: Visitor>(&self, visitor: &mut V) {
+        match &self.inner {
+            PatternMatchAux::Expression(pat, exp) => {
+                visitor.visit_pattern(pat);
+                visitor.visit_expression(exp);
+            }
+            PatternMatchAux::When(pat, exp0, exp1) => {
+                visitor.visit_pattern(pat);
+                visitor.visit_expression(exp0);
+                visitor.visit_expression(exp1);
+            }
+        }
+    }
 }
 
 /// Value binding
@@ -704,6 +950,16 @@ pub enum MappingPatternExpressionAux {
 pub struct TypQuant {
     pub inner: TypQuantAux,
     pub location: L,
+}
+
+impl Walkable for TypQuant {
+    fn walk<V: Visitor>(&self, visitor: &mut V) {
+        let TypQuantAux::Tq(tq) = &self.inner else {
+            return;
+        };
+
+        tq.iter().for_each(|q| visitor.visit_quantitem(q));
+    }
 }
 
 #[identifiable_fromvalue]
@@ -791,6 +1047,13 @@ pub struct TypeScheme {
     pub location: L,
 }
 
+impl Walkable for TypeScheme {
+    fn walk<V: Visitor>(&self, visitor: &mut V) {
+        visitor.visit_typquant(&self.inner.typ_quantifier);
+        visitor.visit_typ(&self.inner.typ);
+    }
+}
+
 #[identifiable_fromvalue]
 #[derive(Debug, Clone, Serialize, Deserialize, DeepSizeOf)]
 pub struct AliasSpec {
@@ -805,11 +1068,30 @@ pub struct TypeAnnotationOpt {
     pub location: L,
 }
 
+impl Walkable for TypeAnnotationOpt {
+    fn walk<V: Visitor>(&self, visitor: &mut V) {
+        match &self.inner {
+            TypeAnnotationOptAux::None => (),
+            TypeAnnotationOptAux::Some(typquant, typ) => {
+                visitor.visit_typquant(typquant);
+                visitor.visit_typ(typ);
+            }
+        }
+    }
+}
+
 #[identifiable_fromvalue]
 #[derive(Debug, Clone, Serialize, Deserialize, DeepSizeOf)]
 pub struct FunctionClause {
     pub inner: FunctionClauseAux,
     pub annotation: Annot,
+}
+
+impl Walkable for FunctionClause {
+    fn walk<V: Visitor>(&self, visitor: &mut V) {
+        visitor.visit_identifier(&self.inner.identifier);
+        visitor.visit_pattern_match(&self.inner.pattern_match);
+    }
 }
 
 #[identifiable_fromvalue]
@@ -819,11 +1101,32 @@ pub struct RecursiveAnnotationOpt {
     pub location: L,
 }
 
+impl Walkable for RecursiveAnnotationOpt {
+    fn walk<V: Visitor>(&self, visitor: &mut V) {
+        match &self.inner {
+            RecursiveAnnotationOptAux::NonRecursive | RecursiveAnnotationOptAux::Recursive => (),
+            RecursiveAnnotationOptAux::Measure(pat, exp) => {
+                visitor.visit_pattern(pat);
+                visitor.visit_expression(exp);
+            }
+        }
+    }
+}
+
 #[identifiable_fromvalue]
 #[derive(Debug, Clone, Serialize, Deserialize, DeepSizeOf)]
 pub struct EffectOpt {
     pub inner: EffectAnnotationOptAux,
     pub location: L,
+}
+
+impl Walkable for EffectOpt {
+    fn walk<V: Visitor>(&self, visitor: &mut V) {
+        match &self.inner {
+            EffectAnnotationOptAux::None => (),
+            EffectAnnotationOptAux::Some(effect) => visitor.visit_effect(effect),
+        }
+    }
 }
 
 #[identifiable_fromvalue]
@@ -956,6 +1259,12 @@ pub struct ValueSpecification {
     pub annotation: Annot,
 }
 
+impl Walkable for ValueSpecification {
+    fn walk<V: Visitor>(&self, visitor: &mut V) {
+        visitor.visit_type_scheme(&self.inner.typ_scheme);
+    }
+}
+
 #[identifiable_fromvalue]
 #[derive(Debug, Clone, Serialize, Deserialize, DeepSizeOf)]
 pub struct DecSpec {
@@ -970,11 +1279,31 @@ pub struct FunctionDefinition {
     pub annotation: Annot,
 }
 
+impl Walkable for FunctionDefinition {
+    fn walk<V: Visitor>(&self, visitor: &mut V) {
+        visitor.visit_recursive_annotation_opt(&self.inner.recursive_annotation);
+        visitor.visit_type_annotation_opt(&self.inner.type_annotation);
+        visitor.visit_effect_opt(&self.inner.effect);
+        self.inner
+            .clauses
+            .iter()
+            .for_each(|c| visitor.visit_function_clause(c));
+    }
+}
+
 #[identifiable_fromvalue]
 #[derive(Debug, Clone, Serialize, Deserialize, DeepSizeOf)]
 pub struct DefaultSpec {
     pub inner: DefaultSpecAux,
     pub location: L,
+}
+
+impl Walkable for DefaultSpec {
+    fn walk<V: Visitor>(&self, visitor: &mut V) {
+        match &self.inner {
+            DefaultSpecAux::Order(order) => visitor.visit_order(order),
+        }
+    }
 }
 
 #[derive(Debug, Clone, FromValue, Serialize, Deserialize, DeepSizeOf)]
@@ -1003,6 +1332,19 @@ pub struct ScatteredDefinition {
 pub struct TypeDefinition {
     pub inner: TypeDefinitionAux,
     pub annotation: Annot,
+}
+
+impl Walkable for TypeDefinition {
+    fn walk<V: Visitor>(&self, visitor: &mut V) {
+        match &self.inner {
+            TypeDefinitionAux::Abbreviation(ident, typquant, typarg) => {
+                visitor.visit_identifier(ident);
+                visitor.visit_typquant(typquant);
+                visitor.visit_typarg(typarg);
+            }
+            _ => todo!(),
+        }
+    }
 }
 
 #[identifiable_fromvalue]
@@ -1072,7 +1414,28 @@ impl Walkable for Definition {
     fn walk<V: Visitor>(&self, visitor: &mut V) {
         match self {
             Definition::Type(typedef) => visitor.visit_type_definition(typedef),
-            _ => (),
+            Definition::Function(funcdef) => visitor.visit_function_definition(funcdef),
+            Definition::Mapping(_) => todo!(),
+            Definition::Value(_) => todo!(),
+            Definition::Spec(valuespec) => visitor.visit_value_specification(valuespec),
+            Definition::Fixity(_, _, ident) => visitor.visit_identifier(ident),
+            Definition::Overload(id, ids) => {
+                visitor.visit_identifier(id);
+                ids.iter().for_each(|id| visitor.visit_identifier(id));
+            }
+            Definition::Default(default) => visitor.visit_default_spec(default),
+            Definition::Scattered(_) => todo!(),
+            Definition::TerminationMeasurePatternExpression {
+                identifier,
+                pattern,
+                expression,
+            } => todo!(),
+            Definition::TerminationMeasureLoop(_, _) => todo!(),
+            Definition::Register(_) => todo!(),
+            Definition::Mutual(funcdefs) => funcdefs
+                .iter()
+                .for_each(|f| visitor.visit_function_definition(f)),
+            Definition::Pragma(_, _, _) => (),
         }
     }
 }
@@ -1127,16 +1490,5 @@ impl Walkable for Ast {
         self.comments
             .iter()
             .for_each(|c| visitor.visit_comment_root(c));
-    }
-}
-
-impl Walkable for TypeDefinition {
-    fn walk<V: Visitor>(&self, visitor: &mut V) {
-        match self.inner {
-            TypeDefinitionAux::Abbreviation(ref ident, _, _) => {
-                visitor.visit_identifier(ident);
-            }
-            _ => (),
-        }
     }
 }
