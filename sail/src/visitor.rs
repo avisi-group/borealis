@@ -25,7 +25,7 @@ pub trait Visitor: Sized {
     }
 
     #[allow(missing_docs)]
-    fn visit_definition(&mut self, node: &Definition) {
+    fn visit_definition(&mut self, node: &EnumWrapper<Definition>) {
         node.walk(self);
     }
 

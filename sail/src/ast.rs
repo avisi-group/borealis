@@ -1859,9 +1859,9 @@ pub enum Definition {
     Pragma(OCamlString, OCamlString, L),
 }
 
-impl Walkable for Definition {
+impl Walkable for EnumWrapper<Definition> {
     fn walk<V: Visitor>(&self, visitor: &mut V) {
-        match self {
+        match &self.inner {
             Definition::Type(typedef) => visitor.visit_type_definition(typedef),
             Definition::Function(funcdef) => visitor.visit_function_definition(funcdef),
             Definition::Mapping(mapdef) => visitor.visit_mapping_definition(mapdef),
@@ -1942,9 +1942,7 @@ pub struct Ast {
 
 impl Walkable for Ast {
     fn walk<V: Visitor>(&self, visitor: &mut V) {
-        self.defs
-            .iter()
-            .for_each(|d| visitor.visit_definition(&d.inner));
+        self.defs.iter().for_each(|d| visitor.visit_definition(d));
         self.comments
             .iter()
             .for_each(|c| visitor.visit_comment_root(c));
