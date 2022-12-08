@@ -4,12 +4,14 @@
 
 use crate::{
     ast::{
-        Ast, BaseEffect, Comment, CommentRoot, DefaultSpec, Definition, Effect, EffectOpt,
-        Expression, FieldExpression, FunctionClause, FunctionDefinition, Identifier,
-        InternalLoopMeasure, KindIdentifier, KindedIdentifier, LValueExpression, LetBind, Literal,
-        Loop, NConstraint, NumericExpression, Order, Pattern, PatternMatch, QuantItem,
-        RecursiveAnnotationOpt, Typ, TypArg, TypPat, TypQuant, TypeAnnotationOpt, TypeDefinition,
-        TypeScheme, Value, ValueSpecification,
+        AliasSpec, Ast, BaseEffect, Comment, CommentRoot, DecSpec, DefaultSpec, Definition, Effect,
+        EffectOpt, Expression, FieldExpression, FunctionClause, FunctionDefinition, Identifier,
+        IndexRange, InternalLoopMeasure, KindIdentifier, KindedIdentifier, LValueExpression,
+        LetBind, Literal, LoopMeasure, MappingClause, MappingDefinition, MappingPattern,
+        MappingPatternExpression, NConstraint, NumericExpression, Order, Pattern, PatternMatch,
+        QuantItem, RecursiveAnnotationOpt, RegisterId, ScatteredDefinition, Typ, TypArg, TypPat,
+        TypQuant, TypeAnnotationOpt, TypeDefinition, TypeScheme, TypeUnion, Value,
+        ValueSpecification,
     },
     num::BigInt,
     types::EnumWrapper,
@@ -194,6 +196,61 @@ pub trait Visitor: Sized {
 
     #[allow(missing_docs)]
     fn visit_value(&mut self, node: &EnumWrapper<Value>) {
+        node.walk(self);
+    }
+
+    #[allow(missing_docs)]
+    fn visit_typunion(&mut self, node: &TypeUnion) {
+        node.walk(self);
+    }
+
+    #[allow(missing_docs)]
+    fn visit_indexrange(&mut self, node: &IndexRange) {
+        node.walk(self);
+    }
+
+    #[allow(missing_docs)]
+    fn visit_decspec(&mut self, node: &DecSpec) {
+        node.walk(self);
+    }
+
+    #[allow(missing_docs)]
+    fn visit_aliasspec(&mut self, node: &AliasSpec) {
+        node.walk(self);
+    }
+
+    #[allow(missing_docs)]
+    fn visit_registerid(&mut self, node: &RegisterId) {
+        node.walk(self);
+    }
+
+    #[allow(missing_docs)]
+    fn visit_mapping_definition(&mut self, node: &MappingDefinition) {
+        node.walk(self);
+    }
+
+    #[allow(missing_docs)]
+    fn visit_scattered_definition(&mut self, node: &ScatteredDefinition) {
+        node.walk(self);
+    }
+
+    #[allow(missing_docs)]
+    fn visit_loop_measure(&mut self, node: &LoopMeasure) {
+        node.walk(self);
+    }
+
+    #[allow(missing_docs)]
+    fn visit_mapping_clause(&mut self, node: &MappingClause) {
+        node.walk(self);
+    }
+
+    #[allow(missing_docs)]
+    fn visit_mapping_pattern_expression(&mut self, node: &MappingPatternExpression) {
+        node.walk(self);
+    }
+
+    #[allow(missing_docs)]
+    fn visit_mapping_pattern(&mut self, node: &MappingPattern) {
         node.walk(self);
     }
 }
