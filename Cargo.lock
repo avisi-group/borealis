@@ -294,7 +294,7 @@ dependencies = [
 [[package]]
 name = "errctx"
 version = "1.0.0"
-source = "git+https://github.com/fmckeogh/errctx#28b3ccc4e516901604091aa4b1d1ddbe3e715965"
+source = "git+https://github.com/fmckeogh/errctx#d774d38ee5a71eaec9b91742ffd9966b5c247fda"
 dependencies = [
  "thiserror",
 ]
