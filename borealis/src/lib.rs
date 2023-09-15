@@ -4,7 +4,7 @@
 
 use {
     crate::{
-        boom::{control_flow::ControlFlowBlock, Statement},
+        boom::{control_flow::ControlFlowBlock, Size, Statement, Type},
         codegen::{
             functions::{contains_write_pc, generate_enums, generate_fns},
             instruction::{generate_execute_entrypoint, get_instruction_entrypoint_fns},
@@ -12,9 +12,12 @@ use {
         genc_model::{
             Bank, Behaviours, Description, Endianness, Instruction, RegisterSpace, Slot, Typ, View,
         },
-        passes::execute_passes,
+        passes::{execute_passes, registers::mangle_register},
     },
-    common::{intern::INTERNER, HashMap},
+    common::{
+        intern::{InternedString, INTERNER},
+        HashMap, HashSet,
+    },
     deepsize::DeepSizeOf,
     errctx::PathCtx,
     log::{info, trace},
@@ -125,7 +128,23 @@ pub fn sail_to_genc(sail_ast: &Ast, jib_ast: &LinkedList<Definition>) -> Descrip
                 "branch_unconditional_register",
                 "system_exceptions_runtime_svc_decode",
                 "system_exceptions_runtime_svc",
-               // "AArch64_CallSupervisor"
+                "integer_conditional_compare_immediate_decode",
+                "integer_conditional_compare_immediate",
+                "memory_single_general_register_memory_single_general_register__decode",
+                "memory_single_general_register",
+                "integer_conditional_compare_register_decode",
+                "integer_conditional_compare_register",
+                "memory_single_general_immediate_signed_offset_normal_memory_single_general_immediate_signed_offset_normal__decode",
+                "memory_single_general_immediate_signed_offset_normal",
+                "integer_bitfield_decode",
+                "integer_bitfield",
+                "branch_conditional_test_decode",
+                "branch_conditional_test",
+                // "system_register_system_decode",
+                // "AArch64_CheckSystemAccess",
+                // "system_register_system",
+                // "IMPDEF_boolean",
+                // "IMPDEF_boolean_map"
             ]
             .contains(&k.as_ref())
             {
@@ -190,16 +209,28 @@ pub fn sail_to_genc(sail_ast: &Ast, jib_ast: &LinkedList<Definition>) -> Descrip
 
         constants.insert("unpred_tsize_aborts".into(), (Typ::Uint8, 0));
 
+        constants.insert("mte_implemented".into(), (Typ::Uint8, 0));
+        constants.insert("mpam_implemented".into(), (Typ::Uint8, 0));
+        constants.insert("crypto_sm4_implemented".into(), (Typ::Uint8, 0));
+        constants.insert("crypto_sm3_implemented".into(), (Typ::Uint8, 0));
+        constants.insert("crypto_sha3_implemented".into(), (Typ::Uint8, 0));
+        constants.insert("crypto_sha256_implemented".into(), (Typ::Uint8, 0));
+        constants.insert("crypto_sha512_implemented".into(), (Typ::Uint8, 0));
+        constants.insert("crypto_aes_implemented".into(), (Typ::Uint8, 0));
+        constants.insert("crypto_sha1_implemented".into(), (Typ::Uint8, 0));
+
         constants
     };
 
-    Description {
-        name: "arm64".to_owned(),
-        endianness: Endianness::LittleEndian,
-        wordsize: 64,
-        fetchsize: 32,
-        predicated: false,
-        registers: vec![
+    let registers = {
+        let mut builtins = HashSet::default();
+        builtins.extend(
+            ["PC", "RB", "SP", "N", "Z", "C", "V"]
+                .into_iter()
+                .map(InternedString::from_static),
+        );
+
+        let mut initial = vec![
             RegisterSpace {
                 size: 256,
                 views: vec![View::Bank(Bank {
@@ -272,33 +303,64 @@ pub fn sail_to_genc(sail_ast: &Ast, jib_ast: &LinkedList<Definition>) -> Descrip
                     }),
                 ],
             },
-            RegisterSpace {
-                size: 3,
-                views: vec![
-                    View::Slot(Slot {
-                        name: "BTypeCompatible".into(),
-                        typ: genc_model::Typ::Uint8,
-                        width: 1,
+        ];
+
+        initial.extend(
+            ast.borrow()
+                .registers
+                .iter()
+                // remove registers that already exist as constants
+                .filter(|(name, _)| !constants.contains_key(name))
+                .filter(|(name, _)| !builtins.contains(*name))
+                .filter_map(|(name, typ)| match &*typ.borrow() {
+                    Type::Int {
+                        size: Size::Static(size),
+                        ..
+                    } => Some((name, *size)),
+                    Type::Int {
+                        size: Size::Unknown,
+                        ..
+                    } => None,
+                    Type::FixedVector {
+                        length,
+                        element_type,
+                    } => {
+                        if let Type::Bool = &*element_type.borrow() {
+                            Some((name, (*length).try_into().unwrap()))
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                })
+                .map(|(name, size)| RegisterSpace {
+                    size: size.try_into().unwrap(),
+                    views: vec![View::Slot(Slot {
+                        name: mangle_register(*name).to_string(),
+                        typ: match size {
+                            1..=8 => genc_model::Typ::Uint8,
+                            9..=16 => genc_model::Typ::Uint16,
+                            17..=32 => genc_model::Typ::Uint32,
+                            33..=64 => genc_model::Typ::Uint64,
+                            _ => panic!(),
+                        },
                         offset: 0,
+                        width: size.try_into().unwrap(),
                         tag: None,
-                    }),
-                    View::Slot(Slot {
-                        name: "BTypeNext".into(),
-                        typ: genc_model::Typ::Uint8,
-                        width: 1,
-                        offset: 1,
-                        tag: None,
-                    }),
-                    View::Slot(Slot {
-                        name: "InGuardedPage".into(),
-                        typ: genc_model::Typ::Uint8,
-                        width: 1,
-                        offset: 2,
-                        tag: None,
-                    }),
-                ],
-            },
-        ],
+                    })],
+                }),
+        );
+
+        initial
+    };
+
+    Description {
+        name: "arm64".to_owned(),
+        endianness: Endianness::LittleEndian,
+        wordsize: 64,
+        fetchsize: 32,
+        predicated: false,
+        registers,
         instructions,
         behaviours: Behaviours {
             handle_exception: "".to_owned(),

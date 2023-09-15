@@ -12,10 +12,15 @@ use {
     std::{cell::RefCell, rc::Rc},
 };
 
+/// Replace any access or assignment to PSTATE with a call to write/read
+/// register
 #[derive(Debug, Default)]
-pub struct RegisterHandler;
+pub struct RegisterHandler {
+    ast: Option<Rc<RefCell<Ast>>>,
+}
 
 impl RegisterHandler {
+    /// Create a new Pass object
     pub fn new_boxed() -> Box<dyn Pass> {
         Box::<Self>::default()
     }
@@ -29,6 +34,24 @@ impl Pass for RegisterHandler {
     fn reset(&mut self) {}
 
     fn run(&mut self, ast: Rc<RefCell<Ast>>) -> bool {
+        // {
+        //     let mut ast = ast.borrow_mut();
+
+        //     ast.registers = ast
+        //         .registers
+        //         .iter()
+        //         .map(|(name, typ)| {
+        //             if !name.as_ref().starts_with("reg_") {
+        //                 (mangle_reg(*name), typ.clone())
+        //             } else {
+        //                 (*name, typ.clone())
+        //             }
+        //         })
+        //         .collect();
+        // }
+
+        self.ast = Some(ast.clone());
+
         ast.borrow().functions.iter().for_each(|(_, def)| {
             self.visit_function_definition(def);
 
@@ -56,6 +79,18 @@ impl Visitor for RegisterHandler {
                     handle_register_read(node.clone(), expression.clone(), field_name);
                 }
             }
+        // or *from* a register
+        } else if let Value::Identifier(ident) = *value.borrow() {
+            if self
+                .ast
+                .as_ref()
+                .unwrap()
+                .borrow()
+                .registers
+                .contains_key(&ident)
+            {
+                handle_register_read(node.clone(), expression.clone(), ident);
+            }
         }
 
         // if we are copying *into* PSTATE
@@ -65,6 +100,18 @@ impl Visitor for RegisterHandler {
                     handle_register_write(node.clone(), value.clone(), field);
                 }
             };
+        // or *into* a register
+        } else if let Expression::Identifier(ident) = expression {
+            if self
+                .ast
+                .as_ref()
+                .unwrap()
+                .borrow()
+                .registers
+                .contains_key(&ident)
+            {
+                handle_register_write(node.clone(), value.clone(), ident);
+            }
         }
     }
 }
@@ -72,29 +119,29 @@ impl Visitor for RegisterHandler {
 fn handle_register_read(
     node: Rc<RefCell<Statement>>,
     expression: Expression,
-    field_name: InternedString,
+    register_name: InternedString,
 ) {
     *node.borrow_mut() = Statement::FunctionCall {
         expression: Some(expression),
         name: "read_register".into(),
-        arguments: vec![Rc::new(RefCell::new(Value::Identifier(
-            format!("reg_{field_name}").into(),
-        )))],
+        arguments: vec![Rc::new(RefCell::new(Value::Identifier(mangle_register(
+            register_name,
+        ))))],
     }
 }
 
 fn handle_register_write(
     node: Rc<RefCell<Statement>>,
     value: Rc<RefCell<Value>>,
-    field: InternedString,
+    register_name: InternedString,
 ) {
     *node.borrow_mut() = Statement::FunctionCall {
         expression: None,
         name: "write_register".into(),
         arguments: vec![
-            Rc::new(RefCell::new(Value::Identifier(
-                format!("reg_{field}").into(),
-            ))),
+            Rc::new(RefCell::new(Value::Identifier(mangle_register(
+                register_name,
+            )))),
             value,
         ],
     }
@@ -185,9 +232,10 @@ impl Visitor for PcHandler {
             }
             _ => (),
         }
-
-        // if PC is being assigned to write_pc
-
-        //
     }
+}
+
+/// Mangle the register name
+pub fn mangle_register(name: InternedString) -> InternedString {
+    format!("reg_{name}").into()
 }
